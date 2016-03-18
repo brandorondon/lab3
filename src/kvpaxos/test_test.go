@@ -154,6 +154,7 @@ func TestDone(t *testing.T) {
       for j := 0; j < len(value); j++ {
         value[j] = byte((rand.Int() % 100) + 1)
       }
+      fmt.Println("***************** VALUE: ",value)
       ck.Put(key, string(value))
       check(t, cka[i % nservers], key, string(value))
     }
