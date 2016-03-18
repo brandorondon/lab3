@@ -288,7 +288,7 @@ func (px *Paxos) Accept(args *AcceptReq, reply *AcceptReply) error {
         px.seq_map[args.Seq] = Proposal{args.A_n, args.A_n,state.decided,args.Value}
         reply.A_n = args.Seq
         reply.Accepted = true
-        fmt.Println(px.me," accepted ",args.Value)
+        //fmt.Println(px.me," accepted ",args.Value)
     } else {
         reply.Accepted = false
     }

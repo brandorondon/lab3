@@ -2,6 +2,8 @@ package kvpaxos
 
 import "net/rpc"
 import "fmt"
+import "crypto/rand"
+import "math/big"
 
 type Clerk struct {
   servers []string
@@ -56,7 +58,7 @@ func call(srv string, rpcname string,
 //
 func (ck *Clerk) Get(key string) string {
   // You will have to modify this function.
-  args := &GetArgs{key}
+  args := &GetArgs{key,nrand()}
   reply := &GetReply{}
   i := 0
   success := false
@@ -69,7 +71,7 @@ func (ck *Clerk) Get(key string) string {
     } else {
       i++
     }
-    fmt.Println("client stuck")
+    //fmt.Println("client stuck")
   }
   return reply.Value
 }
@@ -80,7 +82,7 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
   // You will have to modify this function.
-  args := &PutArgs{key,value,dohash}
+  args := &PutArgs{key,value,dohash,nrand()}
   reply := &PutReply{}
   i := 0
   success := false
@@ -93,7 +95,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
     } else {
       i++
     }
-    fmt.Println("client stuck")
+    //fmt.Println("client stuck")
   }
   if reply.PreviousValue != "" {
     return reply.PreviousValue
@@ -107,4 +109,11 @@ func (ck *Clerk) Put(key string, value string) {
 func (ck *Clerk) PutHash(key string, value string) string {
   v := ck.PutExt(key, value, true)
   return v
+}
+
+func nrand() int64 {
+  max := big.NewInt(int64(1) << 62)
+  bigx, _ := rand.Int(rand.Reader, max)
+  x := bigx.Int64()
+  return x
 }

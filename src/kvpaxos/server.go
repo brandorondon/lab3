@@ -42,7 +42,7 @@ type KVPaxos struct {
   // Your definitions here.
   kv_store map[string]string
   curr_seq int
-  //op_log map[seq]Op{} Paxos's seq_map is the log already isnt?
+  highest_op int
 }
 
 func(kv *KVPaxos) wait_for_agree(seq int) bool{
@@ -62,7 +62,7 @@ func(kv *KVPaxos) wait_for_agree(seq int) bool{
 
 func(kv *KVPaxos) check_for_holes(seq int){
   hole := false
-  for i := 0 ; i < seq ; i++{
+  for i := kv.highest_op ; i <= seq ; i++{
     completed, _ := kv.px.Status(i)
     if !completed {
       hole = true
@@ -73,40 +73,44 @@ func(kv *KVPaxos) check_for_holes(seq int){
     time.Sleep(10 * time.Millisecond)
     kv.check_for_holes(seq)
   }
+  return
 }
 
 func(kv *KVPaxos) complete(seq int){
-  for i := 0; i < seq ; i++{
-    there, val := kv.px.Status(i)
-    fmt.Println(val)
-    if there {
+  hole_found := false
+  for i := kv.highest_op; i <= seq ; i++{
+    decided, val := kv.px.Status(i)
+    if decided {
       op := val.(Op).Operation
-      if op == "Put" {
-        key := val.(Op).Key
-        value := val.(Op).Value
-        kv.kv_store[key] = value
+      if op == "Put" || op == "Get"{
+        if op == "Put"{
+          key := val.(Op).Key
+          value := val.(Op).Value
+          kv.kv_store[key] = value
+        }
+        if !hole_found {
+          kv.highest_op++
+          //kv.px.Done(i) <---- giving fatal map
+        }
       }
+    } else {
+      //hole_found = true
+      return
     }
   }
 }
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
-  //kv.mu.Lock()
-  //defer kv.mu.Unlock()
-  fmt.Println("get on server: ", kv.me)
-  fmt.Println(kv.kv_store)
+  kv.mu.Lock()
+  defer kv.mu.Unlock()
+
   operation := Op{"Get",args.Key,""}
   done:= false
-  seq := kv.curr_seq
+  seq := kv.px.Max() + 1
+
   for !done {
-    kv.mu.Lock()
-    if kv.px.Max() > kv.curr_seq {
-      seq = kv.px.Max() + 1
-    } else {
-      seq = kv.curr_seq + 1
-    }
-    kv.mu.Unlock()
+    seq = kv.px.Max() + 1
     kv.px.Start(seq, operation)
     agreed := kv.wait_for_agree(seq)
     if !agreed {
@@ -116,36 +120,31 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
       _, decided_val := kv.px.Status(seq)
       success := (decided_val == operation)
       if success {
+        kv.curr_seq = seq
         kv.check_for_holes(seq)
         kv.complete(seq)
         done = true
-        fmt.Println(args.Key)
         reply.Value = kv.kv_store[args.Key]
-        kv.curr_seq = seq
         return nil
-        }
+      }
     }
-    fmt.Println("serv stuck on  get seq: ",seq," with key: ",args.Key)
+    //fmt.Println("serv stuck on  get seq: ",seq," with key: ",args.Key)
   }
   return nil
 }
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
-  //kv.mu.Lock()
-  //defer kv.mu.Unlock()
+  kv.mu.Lock()
+  defer kv.mu.Unlock()
   operation := Op{"Put",args.Key,args.Value}
   done:= false
-  seq := kv.curr_seq
+
+  seq := kv.px.Max() + 1
   reply.PreviousValue = ""
   for !done {
-    kv.mu.Lock()
-    if kv.px.Max() > kv.curr_seq {
-      seq = kv.px.Max() + 1
-    } else {
-      seq = kv.curr_seq + 1
-    }
-    kv.mu.Unlock()
+    seq = kv.px.Max() + 1
+
     kv.px.Start(seq, operation)
     agreed := kv.wait_for_agree(seq)
     if !agreed {
@@ -158,17 +157,15 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
         if args.DoHash {
           reply.PreviousValue = kv.kv_store[args.Key]
         }
-        kv.kv_store[args.Key] = args.Value
+        kv.complete(seq)
+        //kv.px.Done(kv.highest_op-1)
         done = true
         kv.curr_seq = seq
-        
-        fmt.Println("server: ", kv.me)
-        fmt.Println(kv.kv_store)
         return nil
-        }
       }
-      fmt.Println("serv stuck on seq: ",seq," with value: ",args.Value)
     }
+    //fmt.Println("serv stuck on seq: ",seq," with value: ",args.Value)
+  }
   return nil
 }
 
@@ -199,6 +196,7 @@ func StartServer(servers []string, me int) *KVPaxos {
   // Your initialization code here.
   kv.kv_store = make(map[string]string)
   kv.curr_seq = -1
+  kv.highest_op = 0
   //
 
   rpcs := rpc.NewServer()
