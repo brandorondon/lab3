@@ -154,6 +154,7 @@ func TestDone(t *testing.T) {
       for j := 0; j < len(value); j++ {
         value[j] = byte((rand.Int() % 100) + 1)
       }
+
       ck.Put(key, string(value))
       check(t, cka[i % nservers], key, string(value))
     }
@@ -380,12 +381,15 @@ func TestUnreliable(t *testing.T) {
         myck := MakeClerk(sa)
         key := strconv.Itoa(me)
         pv := myck.Get(key)
+        fmt.Println("key: ",key," value: ",pv)
         ov := myck.PutHash(key, "0")
         if ov != pv {
           t.Fatalf("wrong value; expected %s but got %s", pv, ov)
         }
         ov = myck.PutHash(key, "1")
+        //fmt.Println("pv: ",pv)
         pv = NextValue(pv, "0")
+        //fmt.Println("next val: ",pv)
         if ov != pv {
           t.Fatalf("wrong value; expected %s but got %s", pv, ov)
         }

@@ -29,6 +29,8 @@ type Op struct {
   Operation string
   Key string
   Value string
+  Result string
+  Op_ID int64
 }
 
 type KVPaxos struct {
@@ -43,6 +45,8 @@ type KVPaxos struct {
   kv_store map[string]string
   curr_seq int
   highest_op int
+  serv_requests map[int64]int64
+  responses map[int64]string
 }
 
 func(kv *KVPaxos) wait_for_agree(seq int) bool{
@@ -66,7 +70,7 @@ func(kv *KVPaxos) check_for_holes(seq int){
     completed, _ := kv.px.Status(i)
     if !completed {
       hole = true
-      kv.px.Start(i,Op{"","",""})
+      kv.px.Start(i,Op{"","","","",-1})
     }
   }
   if hole {
@@ -81,16 +85,21 @@ func(kv *KVPaxos) complete(seq int){
   for i := kv.highest_op; i <= seq ; i++{
     decided, val := kv.px.Status(i)
     if decided {
-      op := val.(Op).Operation
-      if op == "Put" || op == "Get"{
-        if op == "Put"{
-          key := val.(Op).Key
-          value := val.(Op).Value
+      op := val.(Op)
+      if op.Operation != ""{
+        key := val.(Op).Key
+        value := val.(Op).Value
+        kv.responses[op.Op_ID] = ""
+        if op.Operation == "PutHash" || op.Operation == "Get"{
+          op.Result = kv.kv_store[key]
+          kv.responses[op.Op_ID] = op.Result
+        }
+        if op.Operation != "Get"{
           kv.kv_store[key] = value
         }
         if !hole_found {
           kv.highest_op++
-          //kv.px.Done(i) <---- giving fatal map
+          //kv.px.Done(i) <---- giving fatal map problem
         }
       }
     } else {
@@ -105,7 +114,14 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   kv.mu.Lock()
   defer kv.mu.Unlock()
 
-  operation := Op{"Get",args.Key,""}
+  operation := Op{"Get",args.Key,"","",args.Id}
+
+  last_serv_req, there:= kv.serv_requests[args.Serv_id]
+  if there && last_serv_req == args.Id{
+    reply.Value = kv.responses[args.Id]
+    return nil
+  }
+
   done:= false
   seq := kv.px.Max() + 1
 
@@ -123,12 +139,12 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
         kv.curr_seq = seq
         kv.check_for_holes(seq)
         kv.complete(seq)
+        kv.serv_requests[args.Serv_id] = args.Id
+        reply.Value = kv.responses[args.Id]
         done = true
-        reply.Value = kv.kv_store[args.Key]
         return nil
       }
     }
-    //fmt.Println("serv stuck on  get seq: ",seq," with key: ",args.Key)
   }
   return nil
 }
@@ -137,8 +153,19 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
   kv.mu.Lock()
   defer kv.mu.Unlock()
-  operation := Op{"Put",args.Key,args.Value}
+
+  operation := Op{"Put",args.Key,args.Value,"",args.Id}
+  if args.DoHash{
+    operation.Operation = "PutHash"
+  }
+
   done:= false
+  //duplicate request
+  last_serv_req, there:= kv.serv_requests[args.Serv_id]
+  if there && last_serv_req == args.Id{
+    reply.PreviousValue = kv.responses[args.Id]
+    return nil
+  }
 
   seq := kv.px.Max() + 1
   reply.PreviousValue = ""
@@ -154,17 +181,15 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
       _, decided_val := kv.px.Status(seq)
       success := (decided_val == operation)
       if success {
-        if args.DoHash {
-          reply.PreviousValue = kv.kv_store[args.Key]
-        }
         kv.complete(seq)
+        kv.serv_requests[args.Serv_id] = args.Id
+        reply.PreviousValue = kv.responses[args.Id]
         //kv.px.Done(kv.highest_op-1)
         done = true
         kv.curr_seq = seq
         return nil
       }
     }
-    //fmt.Println("serv stuck on seq: ",seq," with value: ",args.Value)
   }
   return nil
 }
@@ -197,6 +222,8 @@ func StartServer(servers []string, me int) *KVPaxos {
   kv.kv_store = make(map[string]string)
   kv.curr_seq = -1
   kv.highest_op = 0
+  kv.serv_requests = make(map[int64]int64)
+  kv.responses = make(map[int64]string)
   //
 
   rpcs := rpc.NewServer()

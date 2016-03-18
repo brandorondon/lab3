@@ -7,6 +7,7 @@ import "math/big"
 
 type Clerk struct {
   servers []string
+  client_id int64
   // You will have to modify this struct.
 }
 
@@ -14,6 +15,7 @@ type Clerk struct {
 func MakeClerk(servers []string) *Clerk {
   ck := new(Clerk)
   ck.servers = servers
+  ck.client_id = nrand()
   // You'll have to add code here.
   return ck
 }
@@ -58,7 +60,7 @@ func call(srv string, rpcname string,
 //
 func (ck *Clerk) Get(key string) string {
   // You will have to modify this function.
-  args := &GetArgs{key,nrand()}
+  args := &GetArgs{key,nrand(),ck.client_id}
   reply := &GetReply{}
   i := 0
   success := false
@@ -66,6 +68,7 @@ func (ck *Clerk) Get(key string) string {
     if call(ck.servers[i],"KVPaxos.Get",args,reply) && !reply.Partitioned{
       success = true
     }
+    reply.Partitioned = false
     if i == len(ck.servers) - 1 {
       i = 0
     } else {
@@ -82,7 +85,7 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
   // You will have to modify this function.
-  args := &PutArgs{key,value,dohash,nrand()}
+  args := &PutArgs{key,value,dohash,nrand(),ck.client_id}
   reply := &PutReply{}
   i := 0
   success := false
@@ -90,6 +93,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
     if call(ck.servers[i],"KVPaxos.Put",args,reply) && !reply.Partitioned{
       success = true
     }
+    reply.Partitioned = false
     if i == len(ck.servers) - 1 {
       i = 0
     } else {
@@ -104,6 +108,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 }
 
 func (ck *Clerk) Put(key string, value string) {
+  //fmt.Println(ck.client_id)
   ck.PutExt(key, value, false)
 }
 func (ck *Clerk) PutHash(key string, value string) string {
