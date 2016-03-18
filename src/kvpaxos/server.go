@@ -79,34 +79,34 @@ func(kv *KVPaxos) complete(seq int){
   for i := 0; i < seq ; i++{
     there, val := kv.px.Status(i)
     fmt.Println(val)
-    if there && val != nil {
+    if there {
       op := val.(Op).Operation
       if op == "Put" {
         key := val.(Op).Key
         value := val.(Op).Value
         kv.kv_store[key] = value
       }
-    } else {
-      kv.px.Start(i,Op{"","",""})
     }
   }
 }
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
-  kv.mu.Lock()
-  defer kv.mu.Unlock()
+  //kv.mu.Lock()
+  //defer kv.mu.Unlock()
   fmt.Println("get on server: ", kv.me)
   fmt.Println(kv.kv_store)
   operation := Op{"Get",args.Key,""}
   done:= false
   seq := kv.curr_seq
   for !done {
+    kv.mu.Lock()
     if kv.px.Max() > kv.curr_seq {
       seq = kv.px.Max() + 1
     } else {
       seq = kv.curr_seq + 1
     }
+    kv.mu.Unlock()
     kv.px.Start(seq, operation)
     agreed := kv.wait_for_agree(seq)
     if !agreed {
@@ -122,7 +122,6 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
         fmt.Println(args.Key)
         reply.Value = kv.kv_store[args.Key]
         kv.curr_seq = seq
-        kv.px.Done(seq)
         return nil
         }
     }
@@ -133,18 +132,20 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
-  kv.mu.Lock()
-  defer kv.mu.Unlock()
+  //kv.mu.Lock()
+  //defer kv.mu.Unlock()
   operation := Op{"Put",args.Key,args.Value}
   done:= false
   seq := kv.curr_seq
   reply.PreviousValue = ""
   for !done {
+    kv.mu.Lock()
     if kv.px.Max() > kv.curr_seq {
       seq = kv.px.Max() + 1
     } else {
       seq = kv.curr_seq + 1
     }
+    kv.mu.Unlock()
     kv.px.Start(seq, operation)
     agreed := kv.wait_for_agree(seq)
     if !agreed {
@@ -160,9 +161,7 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
         kv.kv_store[args.Key] = args.Value
         done = true
         kv.curr_seq = seq
-        kv.check_for_holes(seq)
-        kv.complete(seq)
-        kv.px.Done(seq)
+        
         fmt.Println("server: ", kv.me)
         fmt.Println(kv.kv_store)
         return nil
