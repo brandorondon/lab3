@@ -379,9 +379,11 @@ func TestUnreliable(t *testing.T) {
           sa[i], sa[j] = sa[j], sa[i]
         }
         myck := MakeClerk(sa)
+        fmt.Println("**********************me:  ",me)
         key := strconv.Itoa(me)
         pv := myck.Get(key)
-        fmt.Println("key: ",key," value: ",pv)
+        fmt.Print("&&&&&pv here:",pv)
+        //fmt.Println("key: ",key," value: ",pv)
         ov := myck.PutHash(key, "0")
         if ov != pv {
           t.Fatalf("wrong value; expected %s but got %s", pv, ov)
@@ -389,6 +391,7 @@ func TestUnreliable(t *testing.T) {
         ov = myck.PutHash(key, "1")
         //fmt.Println("pv: ",pv)
         pv = NextValue(pv, "0")
+        fmt.Print("pv here:",pv)
         //fmt.Println("next val: ",pv)
         if ov != pv {
           t.Fatalf("wrong value; expected %s but got %s", pv, ov)

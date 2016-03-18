@@ -11,6 +11,7 @@ import "syscall"
 import "encoding/gob"
 import "math/rand"
 import "time"
+import "strconv"
 
 const Debug=0
 
@@ -66,7 +67,7 @@ func(kv *KVPaxos) wait_for_agree(seq int) bool{
 
 func(kv *KVPaxos) check_for_holes(seq int){
   hole := false
-  for i := kv.highest_op ; i <= seq ; i++{
+  for i := kv.highest_op; i <= seq ; i++{
     completed, _ := kv.px.Status(i)
     if !completed {
       hole = true
@@ -86,21 +87,31 @@ func(kv *KVPaxos) complete(seq int){
     decided, val := kv.px.Status(i)
     if decided {
       op := val.(Op)
-      if op.Operation != ""{
-        key := val.(Op).Key
-        value := val.(Op).Value
-        kv.responses[op.Op_ID] = ""
-        if op.Operation == "PutHash" || op.Operation == "Get"{
-          op.Result = kv.kv_store[key]
-          kv.responses[op.Op_ID] = op.Result
+      key := val.(Op).Key
+      value := val.(Op).Value
+
+      if op.Operation == "PutHash"{
+        old_val := ""
+        _,there := kv.kv_store[key]
+        if there{
+          old_val = kv.kv_store[key]
         }
-        if op.Operation != "Get"{
-          kv.kv_store[key] = value
-        }
-        if !hole_found {
-          kv.highest_op++
-          //kv.px.Done(i) <---- giving fatal map problem
-        }
+        h := hash(old_val + value)
+        new_val := strconv.Itoa(int(h))
+        op.Result = old_val
+        kv.kv_store[key] = new_val
+        kv.responses[op.Op_ID] = op.Result
+      } else if op.Operation == "Put"{
+        kv.kv_store[key] = value
+        op.Result = ""
+        kv.responses[op.Op_ID] = op.Result
+      } else { //Get case
+        op.Result = kv.kv_store[key]
+        kv.responses[op.Op_ID] = op.Result
+      }
+      if !hole_found {
+        kv.highest_op++
+        //kv.px.Done(i) <---- giving fatal map problem
       }
     } else {
       //hole_found = true
@@ -118,6 +129,7 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 
   last_serv_req, there:= kv.serv_requests[args.Serv_id]
   if there && last_serv_req == args.Id{
+    //fmt.Println("*******&******* REPEAT *****&********")
     reply.Value = kv.responses[args.Id]
     return nil
   }
@@ -155,20 +167,19 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   defer kv.mu.Unlock()
 
   operation := Op{"Put",args.Key,args.Value,"",args.Id}
-  if args.DoHash{
+  if args.DoHash {
     operation.Operation = "PutHash"
   }
 
   done:= false
   //duplicate request
-  last_serv_req, there:= kv.serv_requests[args.Serv_id]
-  if there && last_serv_req == args.Id{
+  last_serv_req, there := kv.serv_requests[args.Serv_id]
+  if there && last_serv_req == args.Id {
     reply.PreviousValue = kv.responses[args.Id]
     return nil
   }
 
   seq := kv.px.Max() + 1
-  reply.PreviousValue = ""
   for !done {
     seq = kv.px.Max() + 1
 
@@ -181,6 +192,7 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
       _, decided_val := kv.px.Status(seq)
       success := (decided_val == operation)
       if success {
+        kv.check_for_holes(seq)
         kv.complete(seq)
         kv.serv_requests[args.Serv_id] = args.Id
         reply.PreviousValue = kv.responses[args.Id]
