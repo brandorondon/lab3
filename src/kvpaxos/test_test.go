@@ -379,10 +379,9 @@ func TestUnreliable(t *testing.T) {
           sa[i], sa[j] = sa[j], sa[i]
         }
         myck := MakeClerk(sa)
-        fmt.Println("**********************me:  ",me)
         key := strconv.Itoa(me)
         pv := myck.Get(key)
-        fmt.Print("&&&&&pv here:",pv)
+
         //fmt.Println("key: ",key," value: ",pv)
         ov := myck.PutHash(key, "0")
         if ov != pv {

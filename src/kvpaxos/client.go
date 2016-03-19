@@ -66,7 +66,7 @@ func (ck *Clerk) Get(key string) string {
   success := false
   for !success {
     if call(ck.servers[i],"KVPaxos.Get",args,reply) && !reply.Partitioned{
-      success = true
+      return reply.Value
     }
     reply.Partitioned = false
     if i == len(ck.servers) - 1 {

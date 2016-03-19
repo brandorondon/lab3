@@ -11,7 +11,7 @@ import "syscall"
 import "encoding/gob"
 import "math/rand"
 import "time"
-import "strconv"
+
 
 const Debug=0
 
@@ -67,7 +67,7 @@ func(kv *KVPaxos) wait_for_agree(seq int) bool{
 
 func(kv *KVPaxos) check_for_holes(seq int){
   hole := false
-  for i := kv.highest_op; i <= seq ; i++{
+  for i := kv.px.Min(); i <= kv.px.Max() ; i++{
     completed, _ := kv.px.Status(i)
     if !completed {
       hole = true
@@ -81,43 +81,36 @@ func(kv *KVPaxos) check_for_holes(seq int){
   return
 }
 
-func(kv *KVPaxos) complete(seq int){
-  hole_found := false
-  for i := kv.highest_op; i <= seq ; i++{
+func(kv *KVPaxos) complete(seq int) string{
+
+  var old_val string
+  for i := kv.px.Min(); i <= seq ; i++{
     decided, val := kv.px.Status(i)
     if decided {
       op := val.(Op)
       key := val.(Op).Key
       value := val.(Op).Value
 
+      old_val = ""
+      _,there := kv.kv_store[key]
+
+      if there{
+        old_val = kv.kv_store[key]
+      }
       if op.Operation == "PutHash"{
-        old_val := ""
-        _,there := kv.kv_store[key]
-        if there{
-          old_val = kv.kv_store[key]
-        }
-        h := hash(old_val + value)
-        new_val := strconv.Itoa(int(h))
-        op.Result = old_val
+
+        new_val := NextValue(old_val,value)
         kv.kv_store[key] = new_val
-        kv.responses[op.Op_ID] = op.Result
+
       } else if op.Operation == "Put"{
         kv.kv_store[key] = value
-        op.Result = ""
-        kv.responses[op.Op_ID] = op.Result
-      } else { //Get case
-        op.Result = kv.kv_store[key]
-        kv.responses[op.Op_ID] = op.Result
+
       }
-      if !hole_found {
-        kv.highest_op++
-        //kv.px.Done(i) <---- giving fatal map problem
-      }
-    } else {
-      //hole_found = true
-      return
+      kv.highest_op++
+      //kv.px.Done(i) <---- giving fatal map problem
     }
   }
+  return old_val
 }
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
@@ -130,15 +123,14 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   last_serv_req, there:= kv.serv_requests[args.Serv_id]
   if there && last_serv_req == args.Id{
     //fmt.Println("*******&******* REPEAT *****&********")
-    reply.Value = kv.responses[args.Id]
+    reply.Value = kv.responses[args.Serv_id]
     return nil
   }
 
   done:= false
-  seq := kv.px.Max() + 1
+  seq := kv.px.Max()+1
 
   for !done {
-    seq = kv.px.Max() + 1
     kv.px.Start(seq, operation)
     agreed := kv.wait_for_agree(seq)
     if !agreed {
@@ -148,15 +140,15 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
       _, decided_val := kv.px.Status(seq)
       success := (decided_val == operation)
       if success {
-        kv.curr_seq = seq
         kv.check_for_holes(seq)
-        kv.complete(seq)
-        kv.serv_requests[args.Serv_id] = args.Id
-        reply.Value = kv.responses[args.Id]
+        response := kv.complete(seq)
+        kv.responses[args.Serv_id] = response
+        reply.Value = response
         done = true
         return nil
       }
     }
+    seq = kv.px.Max()+1
   }
   return nil
 }
@@ -175,13 +167,12 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   //duplicate request
   last_serv_req, there := kv.serv_requests[args.Serv_id]
   if there && last_serv_req == args.Id {
-    reply.PreviousValue = kv.responses[args.Id]
+    reply.PreviousValue = kv.responses[args.Serv_id]
     return nil
   }
 
-  seq := kv.px.Max() + 1
+  seq := kv.px.Max()+1
   for !done {
-    seq = kv.px.Max() + 1
 
     kv.px.Start(seq, operation)
     agreed := kv.wait_for_agree(seq)
@@ -193,15 +184,17 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
       success := (decided_val == operation)
       if success {
         kv.check_for_holes(seq)
-        kv.complete(seq)
+        response := kv.complete(seq)
         kv.serv_requests[args.Serv_id] = args.Id
-        reply.PreviousValue = kv.responses[args.Id]
+        kv.responses[args.Serv_id] = response
+        reply.PreviousValue = response
         //kv.px.Done(kv.highest_op-1)
         done = true
         kv.curr_seq = seq
         return nil
       }
     }
+    seq = kv.px.Max()+1
   }
   return nil
 }
